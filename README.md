@@ -105,6 +105,32 @@ Projects: `iphone`, `ipad`, `desktop`. Screenshots are saved to
 | `CODEX_RC_HOST` | `0.0.0.0` | bind host |
 | `CODEX_RC_CWD` | cwd | default cwd for new threads |
 | `CODEX_RC_TOKEN` | random, cached at `~/.arche/codex-rc.token` | auth token |
+| `CODEX_RC_MODEL` | `gpt-5.5` | default model for new threads (empty = let app-server choose) |
+| `CODEX_RC_CODEX_TRANSPORT` | `stdio` | how to talk to `codex app-server` — `stdio` (spawn child) or `ws` (attach) |
+| `CODEX_RC_CODEX_WS_URL` | — | required when `CODEX_RC_CODEX_TRANSPORT=ws`, e.g. `ws://127.0.0.1:9877` |
+| `CODEX_RC_CODEX_WS_AUTH_TOKEN` | — | optional bearer for ws if app-server is behind `--ws-auth` |
+
+### Sharing one app-server (`CODEX_RC_CODEX_TRANSPORT=ws`)
+
+Default mode (`stdio`) spawns a private `codex app-server` and owns
+its lifecycle — same as Phase 1.
+
+In `ws` mode codex-rc instead attaches to an already-running
+app-server. This is the foundation for sharing one agent between
+codex-rc and the local terminal codex (a future phase will land
+session-recovery + multi-client safeguards). For now `ws` mode runs
+as a single-tenant client; the wire envelope to the browser is
+unchanged.
+
+```bash
+# terminal 1: long-running app-server (loopback only — do not expose)
+codex app-server --listen ws://127.0.0.1:9877
+
+# terminal 2: codex-rc points at it
+CODEX_RC_CODEX_TRANSPORT=ws \
+CODEX_RC_CODEX_WS_URL=ws://127.0.0.1:9877 \
+bun run start
+```
 
 ## What's not in Phase 1
 
