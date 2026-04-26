@@ -16,6 +16,13 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 // ────────────────  config  ────────────────
+const INSTANCE = (process.env.CODEX_RC_INSTANCE ?? "").trim();
+// Instance name appears in the token filename and the auth cookie so
+// you can run multiple codex-rc processes on the same host (e.g. one
+// stdio + one ws) without their auth state colliding. Empty = "default"
+// shape used by Phase 1 deployments — preserved for backwards compat.
+const INSTANCE_SUFFIX = INSTANCE ? `-${INSTANCE.replace(/[^A-Za-z0-9_-]/g, "_")}` : "";
+
 const PORT = Number(process.env.CODEX_RC_PORT ?? 9876);
 const HOST = process.env.CODEX_RC_HOST ?? "0.0.0.0";
 const DEFAULT_CWD = process.env.CODEX_RC_CWD ?? process.cwd();
@@ -26,7 +33,7 @@ const CODEX_WS_AUTH_TOKEN = process.env.CODEX_RC_CODEX_WS_AUTH_TOKEN ?? "";
 const CODEX_WS_AUTOSPAWN = (process.env.CODEX_RC_CODEX_WS_AUTOSPAWN ?? "1") !== "0";
 const DIST_DIR = fileURLToPath(new URL("../dist/", import.meta.url));
 const TOKEN_DIR = join(homedir(), ".arche");
-const TOKEN_FILE = join(TOKEN_DIR, "codex-rc.token");
+const TOKEN_FILE = join(TOKEN_DIR, `codex-rc${INSTANCE_SUFFIX}.token`);
 
 function loadOrCreateToken(): string {
   if (!existsSync(TOKEN_DIR)) mkdirSync(TOKEN_DIR, { recursive: true });
@@ -40,7 +47,10 @@ function loadOrCreateToken(): string {
 }
 
 const TOKEN = process.env.CODEX_RC_TOKEN ?? loadOrCreateToken();
-const COOKIE_NAME = "codex_rc_token";
+// Cookie name is also instance-scoped so two codex-rc instances on the
+// same hostname (e.g. :9876 stdio + :9886 ws) don't fight over a single
+// cookie — browsers don't isolate cookies by port.
+const COOKIE_NAME = `codex_rc_token${INSTANCE_SUFFIX}`;
 
 function isAuthed(req: Request): boolean {
   // Try the query token first — a fresh token-bearing URL must always win
@@ -164,9 +174,10 @@ const server = Bun.serve<WsData, never>({
 // ────────────────  banner  ────────────────
 const tailscaleHost = await detectTailscaleHost();
 const url = `http://${tailscaleHost ?? "localhost"}:${PORT}/?t=${TOKEN}`;
+const label = INSTANCE ? `codex-rc[${INSTANCE}]` : "codex-rc";
 console.log("");
 console.log("┌──────────────────────────────────────────────");
-console.log("│  codex-rc listening");
+console.log(`│  ${label} listening`);
 console.log("│  open on phone/desktop:");
 console.log("│  " + url);
 console.log("│  cwd: " + DEFAULT_CWD);

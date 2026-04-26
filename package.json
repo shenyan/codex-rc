@@ -7,6 +7,8 @@
     "dev:web": "vite",
     "build": "vite build",
     "start": "bun server/index.ts",
+    "start:ws": "CODEX_RC_INSTANCE=ws CODEX_RC_PORT=9886 CODEX_RC_CODEX_TRANSPORT=ws CODEX_RC_CODEX_WS_URL=ws://127.0.0.1:9877 bun server/index.ts",
+    "start:both": "bash -c 'bun server/index.ts & CODEX_RC_INSTANCE=ws CODEX_RC_PORT=9886 CODEX_RC_CODEX_TRANSPORT=ws CODEX_RC_CODEX_WS_URL=ws://127.0.0.1:9877 bun server/index.ts; kill %1 2>/dev/null'",
     "test": "bun test tests/transport.test.ts tests/recovery.test.ts",
     "test:e2e": "npx playwright test"
   },
