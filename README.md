@@ -5,10 +5,19 @@ stdio, streams events to a Bun-served React SPA. Built to be reached over
 Tailscale from a phone.
 
 ```
-phone/desktop ──https──▶ Bun.serve (port 9876) ──stdio──▶ codex app-server
-                            │
-                            └── serves dist/ (Vite build) + WS /ws
+phone/desktop ──http──▶ Bun.serve (port 9876) ──stdio──▶ codex app-server
+                          │
+                          └── serves dist/ (Vite build) + WS /ws
 ```
+
+The hop from phone to Bun.serve is plain HTTP. The wire is encrypted
+end-to-end by Tailscale's WireGuard mesh, so the deployment assumption
+is **"reach codex-rc only via your tailnet"** — the listening port is
+not safe to expose on the public internet without your own TLS
+terminator (Tailscale Serve, caddy, etc.). If you do put a TLS
+terminator in front, the auth cookie should also pick up `Secure` —
+that change is not yet wired up because today there is no scenario
+where the server itself sees `https`.
 
 ## Quick start
 
@@ -36,7 +45,16 @@ bun run dev:server    # terminal 1: server on :9876
 bun run dev:web       # terminal 2: Vite on :5173 (proxies /ws → server)
 ```
 
-Open `http://localhost:5173/?t=<token>` (token in `~/.arche/codex-rc.token`).
+Auth is set by the Bun server, not by Vite — Vite only proxies `/ws`
+and `/healthz`, so visiting `http://localhost:5173/?t=...` first will
+404 the cookie set. Set the cookie once:
+
+```
+1. Open http://localhost:9876/?t=<token>   ← Bun server sets cookie
+2. Open http://localhost:5173/             ← Vite UI uses it
+```
+
+(Token lives in `~/.arche/codex-rc.token`.)
 
 ## Layout
 
@@ -98,3 +116,10 @@ Projects: `iphone`, `ipad`, `desktop`. Screenshots are saved to
   is a future toggle if you want hard cwd isolation.
 - Approvals: only `accept` / `decline` from the UI. `acceptForSession`
   exists in the wire protocol but no button yet.
+
+## Phase 2 research
+
+Notes for the next phase (sharing one `codex app-server` between
+codex-rc and the local terminal codex) live in
+`docs/shared-app-server-research.md`. Empirical probes are in
+`experiments/multi-client-probe/`.

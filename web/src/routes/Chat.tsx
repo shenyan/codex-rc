@@ -84,7 +84,7 @@ export default function Chat({ threadId }: { threadId: string }) {
         </div>
       )}
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4" data-testid="messages">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4" data-testid="messages">
         {items.map((item) => <ItemView key={item.id} item={item} />)}
         {items.length === 0 && <div className="text-muted text-sm">No messages yet.</div>}
         {thread?.status === "active" && <TypingDots />}
@@ -135,7 +135,7 @@ function ItemView({ item }: { item: ChatItem }) {
     case "user":
       return (
         <div className="flex justify-end" data-testid="msg-user">
-          <div className="bg-emerald-600 text-white rounded-2xl px-3 py-2 max-w-[85%] whitespace-pre-wrap break-words">
+          <div className="bg-emerald-600 text-white rounded-2xl px-3 py-2 max-w-[85%] whitespace-pre-wrap [overflow-wrap:anywhere]">
             {item.text}
           </div>
         </div>
@@ -143,7 +143,7 @@ function ItemView({ item }: { item: ChatItem }) {
     case "agent":
       return (
         <div className="flex" data-testid="msg-agent">
-          <div className="bg-panel border border-border rounded-2xl px-3 py-2 max-w-[85%] whitespace-pre-wrap break-words">
+          <div className="bg-panel border border-border rounded-2xl px-3 py-2 max-w-[85%] whitespace-pre-wrap [overflow-wrap:anywhere]">
             {item.text}
             {item.streaming && <span className="opacity-50 animate-pulse">▌</span>}
           </div>

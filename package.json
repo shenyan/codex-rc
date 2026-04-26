@@ -7,7 +7,7 @@
     "dev:web": "vite",
     "build": "vite build",
     "start": "bun server/index.ts",
-    "test:e2e": "bunx playwright test"
+    "test:e2e": "npx playwright test"
   },
   "dependencies": {
     "react": "^18.3.1",

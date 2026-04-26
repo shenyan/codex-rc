@@ -78,7 +78,7 @@ test.describe("responsive layout", () => {
 });
 
 test.describe("send message round-trip", () => {
-  test("send 'hi' and receive streamed agent reply", async ({ page }, info) => {
+  test("send 'Reply with exactly: pong' and receive streamed agent reply", async ({ page }, info) => {
     test.skip(info.project.name !== "desktop", "one platform is enough for round-trip");
     test.setTimeout(120_000);
 

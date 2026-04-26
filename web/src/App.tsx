@@ -42,7 +42,7 @@ function ChatLayout() {
       <aside className="hidden md:block md:w-[320px] md:border-r md:border-border h-full">
         <ChatList />
       </aside>
-      <main className="flex-1 h-full">
+      <main className="flex-1 h-full min-w-0">
         {threadId ? <Chat threadId={threadId} /> : null}
       </main>
     </div>

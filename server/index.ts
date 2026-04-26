@@ -9,13 +9,14 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 // ────────────────  config  ────────────────
 const PORT = Number(process.env.CODEX_RC_PORT ?? 9876);
 const HOST = process.env.CODEX_RC_HOST ?? "0.0.0.0";
 const DEFAULT_CWD = process.env.CODEX_RC_CWD ?? process.cwd();
 const DEFAULT_MODEL = process.env.CODEX_RC_MODEL ?? "gpt-5.5";
-const DIST_DIR = new URL("../dist/", import.meta.url).pathname;
+const DIST_DIR = fileURLToPath(new URL("../dist/", import.meta.url));
 const TOKEN_DIR = join(homedir(), ".arche");
 const TOKEN_FILE = join(TOKEN_DIR, "codex-rc.token");
 
@@ -53,7 +54,7 @@ await session.ready();
 console.log("[codex-rc] codex app-server ready");
 
 // ────────────────  server  ────────────────
-type WsData = { send: (m: ServerMsg) => void };
+type WsData = { send: (m: ServerMsg) => void; unsubscribe: () => void };
 
 const server = Bun.serve<WsData, never>({
   port: PORT,
@@ -101,8 +102,8 @@ const server = Bun.serve<WsData, never>({
   websocket: {
     open(ws) {
       const send = (m: ServerMsg) => ws.send(JSON.stringify(m));
-      ws.data = { send };
-      session.subscribe(send);
+      const unsubscribe = session.subscribe(send);
+      ws.data = { send, unsubscribe };
       send(session.snapshot());
     },
     async message(ws, raw) {
@@ -115,10 +116,8 @@ const server = Bun.serve<WsData, never>({
         ws.data.send({ type: "error", message: String(err) });
       }
     },
-    close() {
-      // Subscriber unsub happens via stored function; we leak the closure
-      // until the broadcast loop fails. For Phase 1 this is fine — server
-      // restart clears it.
+    close(ws) {
+      ws.data?.unsubscribe?.();
     },
   },
 });

@@ -150,8 +150,9 @@ export class Session {
         break;
 
       case "turn/completed":
-        if (t) t.activeTurnId = null;
-        this.updateSummary(t!, { status: "idle", lastActiveAt: Date.now() });
+        if (!t) break;
+        t.activeTurnId = null;
+        this.updateSummary(t, { status: "idle", lastActiveAt: Date.now() });
         break;
 
       case "item/started":
