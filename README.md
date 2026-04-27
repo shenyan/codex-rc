@@ -180,6 +180,25 @@ Auto-spawned app-server logs go to
 - Approvals: only `accept` / `decline` from the UI. `acceptForSession`
   exists in the wire protocol but no button yet.
 
+## Run codex-rc-ws on boot (launchd)
+
+For the always-on, share-with-the-TUI flavor: install a LaunchAgent
+that starts the ws instance on login and respawns it on crash.
+
+```bash
+bin/install-launchd.sh install     # render plist + launchctl load
+bin/install-launchd.sh status      # show launchctl entry + tail logs
+bin/install-launchd.sh uninstall   # unload + remove plist
+```
+
+The agent is named `com.user.codex-rc-ws` and runs `bun server/index.ts`
+with the same env vars as `bun run start:ws`. Logs:
+`~/.codex/logs/codex-rc-ws.{log,err.log}`.
+
+The stdio instance is intentionally not in the LaunchAgent — that's
+the "I'll start it when I want it" mode. Use `bun run start` for
+that one.
+
 ## Phase 2 research
 
 Notes for the next phase (sharing one `codex app-server` between

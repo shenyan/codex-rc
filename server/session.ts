@@ -262,8 +262,14 @@ export class Session {
       case "thread/status/changed": {
         if (!t) break;
         const s = p.status?.type;
-        const status: ThreadStatus =
-          s === "idle" ? "idle" : s === "active" ? "active" : t.summary.status;
+        const flags: string[] = p.status?.activeFlags ?? [];
+        // codex carries fine-grained sub-states in activeFlags
+        // (e.g. "waitingOnApproval" while a turn is paused for the
+        // user to allow/deny a tool). Surface that as our own
+        // "awaitingApproval" status so the UI can render it.
+        let status: ThreadStatus = t.summary.status;
+        if (s === "idle") status = "idle";
+        else if (s === "active") status = flags.includes("waitingOnApproval") ? "awaitingApproval" : "active";
         this.updateSummary(t, { status });
         break;
       }

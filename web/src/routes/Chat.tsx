@@ -1,7 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { send, useStore } from "../lib/store";
 import type { ChatItem } from "../../../shared/protocol";
+// xterm.js + addon-fit ≈ 250 KB minified — lazy-load so the chat list
+// page paints fast and xterm only ships the first time you scroll a
+// command-output item into view.
+const CommandTerminal = lazy(() => import("../components/CommandTerminal"));
 
 const EMPTY_ITEMS: ChatItem[] = [];
 
@@ -76,7 +80,15 @@ export default function Chat({ threadId }: { threadId: string }) {
                   onClick={() => send({ type: "approve", requestId: p.requestId, decision: "accept" })}
                   className="bg-emerald-600 text-white rounded px-2 py-1 text-xs"
                 >
-                  Allow
+                  Allow once
+                </button>
+                <button
+                  data-testid="approve-accept-session"
+                  onClick={() => send({ type: "approve", requestId: p.requestId, decision: "acceptForSession" })}
+                  className="bg-emerald-700 text-white rounded px-2 py-1 text-xs"
+                  title="Allow this command for the rest of the session without asking again"
+                >
+                  Allow this session
                 </button>
               </div>
             </div>
@@ -88,6 +100,7 @@ export default function Chat({ threadId }: { threadId: string }) {
         {items.map((item) => <ItemView key={item.id} item={item} />)}
         {items.length === 0 && <div className="text-muted text-sm">No messages yet.</div>}
         {thread?.status === "active" && <TypingDots />}
+        {thread?.status === "awaitingApproval" && <ApprovalWaitingHint />}
       </div>
 
       <form
@@ -114,6 +127,16 @@ export default function Chat({ threadId }: { threadId: string }) {
           Send
         </button>
       </form>
+    </div>
+  );
+}
+
+function ApprovalWaitingHint() {
+  return (
+    <div className="flex" data-testid="approval-waiting">
+      <div className="bg-amber-500/15 border border-amber-500/40 text-amber-200 rounded-2xl px-3 py-2 text-xs">
+        Waiting for approval — scroll up to allow / deny.
+      </div>
     </div>
   );
 }
@@ -158,10 +181,14 @@ function ItemView({ item }: { item: ChatItem }) {
       );
     case "command":
       return (
-        <div className="font-mono text-xs bg-black/40 border border-border rounded-lg p-2" data-testid="msg-command">
-          <div className="text-emerald-300">$ {item.command}</div>
-          {item.output && <pre className="text-zinc-300 whitespace-pre-wrap mt-1">{item.output}</pre>}
-          <div className="text-[10px] text-muted mt-1">{item.status}</div>
+        <div className="font-mono text-xs space-y-1" data-testid="msg-command">
+          <div className="text-emerald-300 [overflow-wrap:anywhere]">$ {item.command}</div>
+          {item.output ? (
+            <Suspense fallback={<pre className="text-zinc-400 text-xs whitespace-pre-wrap p-2 bg-bg border border-border rounded">{item.output}</pre>}>
+              <CommandTerminal output={item.output} />
+            </Suspense>
+          ) : null}
+          <div className="text-[10px] text-muted">{item.status}</div>
         </div>
       );
     case "fileChange":
