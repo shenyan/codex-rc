@@ -29,8 +29,31 @@ const DEFAULT_CWD = process.env.CODEX_RC_CWD ?? process.cwd();
 const DEFAULT_MODEL = process.env.CODEX_RC_MODEL ?? "gpt-5.5";
 // Defaults to YOLO ("never" + "dangerFullAccess") — see session.ts
 // rationale. Override with these env vars when you want it stricter.
-const DEFAULT_APPROVAL_POLICY = process.env.CODEX_RC_APPROVAL_POLICY ?? "never";
-const DEFAULT_SANDBOX_MODE = process.env.CODEX_RC_SANDBOX_MODE ?? "dangerFullAccess";
+// Validated against a closed set so a typo in the env file fails
+// fast at boot instead of throwing a confusing JSON-RPC error on
+// the first thread/start later.
+const APPROVAL_POLICIES = ["never", "on-request", "untrusted", "unless-trusted"] as const;
+const SANDBOX_MODES = ["dangerFullAccess", "workspaceWrite", "readOnly"] as const;
+function pickEnum<T extends string>(envName: string, raw: string, allowed: readonly T[], fallback: T): T {
+  if ((allowed as readonly string[]).includes(raw)) return raw as T;
+  console.error(
+    `[codex-rc] invalid ${envName}=${JSON.stringify(raw)}. ` +
+    `Expected one of: ${allowed.join(", ")}.`,
+  );
+  process.exit(1);
+}
+const DEFAULT_APPROVAL_POLICY = pickEnum(
+  "CODEX_RC_APPROVAL_POLICY",
+  process.env.CODEX_RC_APPROVAL_POLICY ?? "never",
+  APPROVAL_POLICIES,
+  "never",
+);
+const DEFAULT_SANDBOX_MODE = pickEnum(
+  "CODEX_RC_SANDBOX_MODE",
+  process.env.CODEX_RC_SANDBOX_MODE ?? "dangerFullAccess",
+  SANDBOX_MODES,
+  "dangerFullAccess",
+);
 const CODEX_TRANSPORT = (process.env.CODEX_RC_CODEX_TRANSPORT ?? "stdio").toLowerCase();
 const CODEX_WS_URL = process.env.CODEX_RC_CODEX_WS_URL ?? "";
 const CODEX_WS_AUTH_TOKEN = process.env.CODEX_RC_CODEX_WS_AUTH_TOKEN ?? "";
