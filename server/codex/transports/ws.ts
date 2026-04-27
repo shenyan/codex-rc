@@ -22,8 +22,9 @@ export class WsCodexTransport implements CodexTransport {
   private frameHandlers: FrameHandler[] = [];
   private closeHandlers: CloseHandler[] = [];
   private opened: Promise<void>;
-  private closed = false;
-  private fired = false;
+  private didOpen = false;     // ws.onopen fired
+  private closed = false;      // close() was called or ws closed
+  private fired = false;       // onClose handlers already invoked
 
   constructor(opts: WsTransportOptions) {
     const headers: Record<string, string> = {};
@@ -37,16 +38,45 @@ export class WsCodexTransport implements CodexTransport {
 
     this.opened = new Promise<void>((resolve, reject) => {
       const t = opts.openTimeoutMs ?? 10000;
-      const timer = setTimeout(() => reject(new Error(`ws open timeout after ${t}ms (url=${opts.url})`)), t);
-      this.ws.addEventListener("open", () => { clearTimeout(timer); resolve(); }, { once: true });
-      this.ws.addEventListener("error", (e) => { clearTimeout(timer); reject(new Error("ws error before open: " + String((e as any).message ?? e))); }, { once: true });
+      const timer = setTimeout(
+        () => reject(new Error(`ws open timeout after ${t}ms (url=${opts.url})`)),
+        t,
+      );
+      const cleanup = () => clearTimeout(timer);
+      this.ws.addEventListener("open", () => {
+        cleanup();
+        this.didOpen = true;
+        resolve();
+      }, { once: true });
+      this.ws.addEventListener("error", (e) => {
+        cleanup();
+        // Only reject `opened` if we never made it open; post-open errors
+        // are handled by the close handler below.
+        if (!this.didOpen) reject(new Error("ws error before open: " + String((e as any).message ?? e)));
+      }, { once: true });
+      // If the server slams the connection shut before sending a frame,
+      // browsers fire `close` without `error`. Without listening here
+      // `ready()` would hang until the open-timeout. Fail fast.
+      this.ws.addEventListener("close", () => {
+        cleanup();
+        if (!this.didOpen) reject(new Error("ws closed before open"));
+      }, { once: true });
     });
 
     this.ws.addEventListener("message", (e) => this.handleFrame(e.data));
-    this.ws.addEventListener("close", (e) => this.handleClose((e as CloseEvent).reason ? new Error((e as CloseEvent).reason) : undefined));
+    this.ws.addEventListener("close", (e) => {
+      // Don't surface onClose to subscribers until after `ready()` settled.
+      // Pre-open closes are reported via the opened promise rejection.
+      if (this.didOpen) {
+        this.handleClose((e as CloseEvent).reason ? new Error((e as CloseEvent).reason) : undefined);
+      } else {
+        this.closed = true;
+      }
+    });
     this.ws.addEventListener("error", (e) => {
-      // Only surface as close if open() resolved; pre-open errors go via opened.reject.
-      if (!this.fired) this.handleClose(new Error("ws error: " + String((e as any).message ?? e)));
+      if (this.didOpen && !this.fired) {
+        this.handleClose(new Error("ws error: " + String((e as any).message ?? e)));
+      }
     });
   }
 
@@ -60,13 +90,29 @@ export class WsCodexTransport implements CodexTransport {
   onFrame(cb: FrameHandler): void { this.frameHandlers.push(cb); }
   onClose(cb: CloseHandler): void { this.closeHandlers.push(cb); }
 
+  /**
+   * Initiate a graceful WebSocket close and wait until the underlying
+   * channel reports CLOSED (with a 2 s safety timeout). Caller can rely
+   * on the connection being gone after this resolves.
+   */
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    try { this.ws.close(1000, "client closing"); } catch {}
+    if (this.ws.readyState === WebSocket.CLOSED) return;
+
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 2000);
+      const done = () => { clearTimeout(timer); resolve(); };
+      this.ws.addEventListener("close", done, { once: true });
+      try {
+        this.ws.close(1000, "client closing");
+      } catch {
+        done();
+      }
+    });
   }
 
-  private handleFrame(raw: string | Buffer | ArrayBuffer | Blob) {
+  private handleFrame(raw: string | ArrayBuffer | Buffer) {
     let text: string;
     if (typeof raw === "string") text = raw;
     else if (raw instanceof ArrayBuffer) text = new TextDecoder().decode(raw);

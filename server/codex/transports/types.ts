@@ -16,7 +16,7 @@ export interface CodexTransport {
   /** Subscribe to incoming frames. Each line/message → one call. */
   onFrame(cb: FrameHandler): void;
 
-  /** Subscribe to transport close. err is null on graceful close. */
+  /** Subscribe to transport close. `err` is undefined on graceful close. */
   onClose(cb: CloseHandler): void;
 
   /** Initiate shutdown. Resolves once the underlying channel is gone. */

@@ -1,6 +1,8 @@
 // xterm.js wrapper for displaying commandExecution output. We track
-// the previously-written byte length so streaming updates write only
-// the delta — that keeps ANSI cursor positioning + colors intact.
+// the previously-written code-unit count (JS .length) so streaming
+// updates write only the new tail — that keeps ANSI cursor
+// positioning and colors intact, since xterm processes bytes
+// statefully.
 
 import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
@@ -23,11 +25,12 @@ const DARK_THEME = {
 
 interface Props {
   output: string;
-  /** Bounded height in px (default 220). Container scrolls inside xterm. */
-  maxHeight?: number;
+  /** Fixed terminal height in px (default 220). Output longer than this
+   *  scrolls inside xterm's own scrollback. */
+  height?: number;
 }
 
-export default function CommandTerminal({ output, maxHeight = 220 }: Props) {
+export default function CommandTerminal({ output, height = 220 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -89,7 +92,7 @@ export default function CommandTerminal({ output, maxHeight = 220 }: Props) {
     <div
       ref={containerRef}
       className="rounded border border-border bg-bg overflow-hidden"
-      style={{ height: maxHeight }}
+      style={{ height }}
       data-testid="command-terminal"
     />
   );

@@ -67,23 +67,33 @@ export class StdioCodexTransport implements CodexTransport {
     try {
       while (true) {
         const { value, done } = await reader.read();
-        if (done) break;
-        this.buf += this.dec.decode(value);
+        if (done) {
+          // Flush so a trailing multi-byte UTF-8 sequence isn't dropped.
+          this.buf += this.dec.decode();
+          if (this.buf.trim().length) this.dispatchLine(this.buf.trim());
+          this.buf = "";
+          break;
+        }
+        // stream:true preserves multi-byte UTF-8 boundaries across chunks.
+        this.buf += this.dec.decode(value, { stream: true });
         let nl: number;
         while ((nl = this.buf.indexOf("\n")) >= 0) {
           const line = this.buf.slice(0, nl).trim();
           this.buf = this.buf.slice(nl + 1);
-          if (!line) continue;
-          let frame: unknown;
-          try { frame = JSON.parse(line); }
-          catch { console.error("[codex stdio] bad JSON:", line); continue; }
-          for (const h of this.frameHandlers) {
-            try { h(frame); } catch (err) { console.error("[codex stdio] frame handler:", err); }
-          }
+          if (line) this.dispatchLine(line);
         }
       }
     } catch (err) {
       // reader rejected — usually means proc exited; watchExit will fire close.
+    }
+  }
+
+  private dispatchLine(line: string) {
+    let frame: unknown;
+    try { frame = JSON.parse(line); }
+    catch { console.error("[codex stdio] bad JSON:", line); return; }
+    for (const h of this.frameHandlers) {
+      try { h(frame); } catch (err) { console.error("[codex stdio] frame handler:", err); }
     }
   }
 
@@ -93,8 +103,12 @@ export class StdioCodexTransport implements CodexTransport {
     try {
       while (true) {
         const { value, done } = await reader.read();
-        if (done) break;
-        process.stderr.write("[codex] " + dec.decode(value));
+        if (done) {
+          const tail = dec.decode();
+          if (tail) process.stderr.write("[codex] " + tail);
+          break;
+        }
+        process.stderr.write("[codex] " + dec.decode(value, { stream: true }));
       }
     } catch {}
   }

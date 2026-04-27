@@ -125,7 +125,7 @@ Projects: `iphone`, `ipad`, `desktop`. Screenshots are saved to
 
 | Env | Default | What |
 |---|---|---|
-| `CODEX_RC_INSTANCE` | _(empty)_ | optional name (e.g. `ws`) — scopes the token file (`codex-rc-${name}.token`) and cookie name (`codex_rc_token-${name}`) so multiple codex-rc instances on the same host don't collide. Banner also prints `codex-rc[${name}]`. |
+| `CODEX_RC_INSTANCE` | _(empty)_ | optional name (e.g. `ws`) — scopes the token file (`codex-rc-${name}.token`) and cookie name (`codex_rc_token-${name}`) so multiple codex-rc instances on the same host don't collide. Banner also prints `codex-rc[${name}]`. Characters outside `[A-Za-z0-9_-]` get replaced with `_`. |
 | `CODEX_RC_PORT` | `9876` | server port |
 | `CODEX_RC_HOST` | `0.0.0.0` | bind host |
 | `CODEX_RC_CWD` | cwd | default cwd for new threads |
@@ -169,16 +169,35 @@ bun run start
 Auto-spawned app-server logs go to
 `~/.codex/logs/codex-rc-app-server.log`.
 
-## What's not in Phase 1
+## Known limitations
 
-- No persistence — restart the server, threads are gone (codex itself
-  rolls them out to `~/.codex/sessions/`, but we don't surface them).
-- No xterm / no diff viewer — bash output and file changes show as
-  plain text.
-- One `codex app-server` process — many threads inside it. Multi-process
-  is a future toggle if you want hard cwd isolation.
-- Approvals: only `accept` / `decline` from the UI. `acceptForSession`
-  exists in the wire protocol but no button yet.
+- No file-diff viewer — `fileChange` items render as a one-line summary
+  rather than a real diff. Coming next.
+- One `codex app-server` per instance — N threads inside one process
+  is fine for daily use, but if you want hard cwd isolation between
+  concurrent threads you'd want N processes.
+- No push notifications when the phone is backgrounded — if the agent
+  pauses for an approval while you're not looking at the app, you
+  won't be nudged. ntfy.sh integration is the planned path.
+
+## Run codex-rc-ws on boot (launchd)
+
+For the always-on, share-with-the-TUI flavor: install a LaunchAgent
+that starts the ws instance on login and respawns it on crash.
+
+```bash
+bin/install-launchd.sh install     # render plist + launchctl load
+bin/install-launchd.sh status      # show launchctl entry + tail logs
+bin/install-launchd.sh uninstall   # unload + remove plist
+```
+
+The agent is named `com.user.codex-rc-ws` and runs `bun server/index.ts`
+with the same env vars as `bun run start:ws`. Logs:
+`~/.codex/logs/codex-rc-ws.{log,err.log}`.
+
+The stdio instance is intentionally not in the LaunchAgent — that's
+the "I'll start it when I want it" mode. Use `bun run start` for
+that one.
 
 ## Run codex-rc-ws on boot (launchd)
 

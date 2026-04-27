@@ -18,6 +18,9 @@ interface ThreadState {
   summary: ThreadSummary;
   items: ChatItem[];
   activeTurnId: string | null;
+  /** True once we've attempted thread/read for this thread; lets us skip
+   *  redundant fetches even when the thread legitimately has no items. */
+  itemsHydrated: boolean;
 }
 
 export class Session {
@@ -121,7 +124,16 @@ export class Session {
         if (ci) items.push(ci);
       }
     }
-    this.threads.set(thread.id, { summary, items, activeTurnId: null });
+    // If the Thread object came from thread/list / thread/read with
+    // turns populated, items are pre-filled and we don't need to call
+    // thread/read again. If it came from a notification (thread/started),
+    // turns is [] and items will be populated lazily on first open.
+    this.threads.set(thread.id, {
+      summary,
+      items,
+      activeTurnId: null,
+      itemsHydrated: items.length > 0,
+    });
   }
 
   subscribe(s: Subscriber): () => void {
@@ -196,16 +208,18 @@ export class Session {
       lastActiveAt: Date.now(),
       preview: "",
     };
-    this.threads.set(id, { summary, items: [], activeTurnId: null });
+    // Newly-created thread is empty — nothing to hydrate from rollout.
+    this.threads.set(id, { summary, items: [], activeTurnId: null, itemsHydrated: true });
     this.broadcast({ type: "thread_created", thread: summary });
   }
 
   private async openThread(threadId: string, reply: Subscriber): Promise<void> {
     let t = this.threads.get(threadId);
     // Lazy-hydrate items from rollout the first time we open a thread.
-    // (Empty `items` in memory is the trigger; on subsequent opens we
-    // just return what's there.)
-    if (t && t.items.length === 0) {
+    // After the first attempt we mark the thread as hydrated so empty
+    // histories don't re-fetch on every open.
+    if (t && !t.itemsHydrated) {
+      t.itemsHydrated = true;
       try {
         const r: any = await this.codex.request("thread/read", { threadId, includeTurns: true });
         const turns = r?.thread?.turns ?? [];
@@ -228,13 +242,21 @@ export class Session {
           this.hydrateFromThread(r.thread);
           this.codex.request("thread/resume", { threadId }).catch(() => {});
           t = this.threads.get(threadId);
-          if (t) this.broadcast({ type: "thread_created", thread: t.summary });
+          if (t) {
+            t.itemsHydrated = true;
+            this.broadcast({ type: "thread_created", thread: t.summary });
+          }
         }
       } catch {
-        // not found — ignore
+        // not found — ignore; reply with error below.
       }
     }
-    if (t) reply({ type: "thread_history", threadId: t.summary.id, items: t.items });
+    if (t) {
+      reply({ type: "thread_history", threadId: t.summary.id, items: t.items });
+    } else {
+      // Don't leave the UI hanging.
+      reply({ type: "error", message: `unknown thread ${threadId}` });
+    }
   }
 
   private async sendText(threadId: string, text: string, reply: Subscriber): Promise<void> {
@@ -303,6 +325,7 @@ export class Session {
         // Cheap to call repeatedly — codex idempotently re-subscribes.
         if (threadId) this.codex.request("thread/resume", { threadId }).catch(() => {});
         break;
+      }
 
       case "serverRequest/resolved": {
         // Fired when the app-server retires a serverRequest — either

@@ -80,9 +80,12 @@ export class CodexClient {
   private handleTransportClose(err?: Error) {
     if (this.closed) return;
     this.closed = true;
-    const closeErr = err ?? new Error("codex transport closed");
+    this.rejectPending(err ?? new Error("codex transport closed"));
+  }
+
+  private rejectPending(err: Error) {
     for (const [, p] of this.pending) {
-      try { p.reject(closeErr); } catch {}
+      try { p.reject(err); } catch {}
     }
     this.pending.clear();
   }
@@ -110,6 +113,11 @@ export class CodexClient {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    // Reject in-flight requests up front so callers don't hang. We can't
+    // rely on the transport's onClose firing through to handleTransportClose
+    // — handleTransportClose checks `closed` and bails, which is correct
+    // (we don't want double-reject) but means we own the cleanup here.
+    this.rejectPending(new Error("codex client closing"));
     await this.transport.close();
   }
 }
