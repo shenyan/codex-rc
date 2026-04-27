@@ -326,9 +326,53 @@ prevent this — but it can:
    point*, accepting that two simultaneous non-coordinated humans on
    different surfaces is a UX problem the protocol cannot solve.
 
-### 2.8 Approval routing — partially observed, mostly inferred
+### 2.8 Approval routing — **fully settled in round 3**
 
-**Open question that could not be settled with `echo`-based prompts.**
+> **Status update (after `experiments/multi-client-probe/approval-probe-v3.ts`):
+> all three open questions answered. The original prose below is preserved
+> for context; the answer is in the box.**
+
+**Three answers, confirmed empirically:**
+
+1. **`serverRequest` for approvals is broadcast to all resumed clients,
+   with the same JSON-RPC `id`.** When the agent decides to call a
+   shell tool that requires approval, every WebSocket connection that
+   has called `thread/resume` for that thread receives an
+   identical `item/commandExecution/requestApproval` request. T1 of
+   the v3 probe shows A and B both got `id=1`.
+2. **`serverRequest/resolved` fans out to all clients**, including
+   ones that did not respond. T2 of the v3 probe: B sent `decline`,
+   both A and B received the resolved notification.
+3. **There is no "first-respond-wins" enforcement.** If two clients
+   respond to the same `id` with different decisions, both responses
+   are accepted by the app-server without error, and the resolution
+   is the one that arrives last (or perhaps non-deterministic at the
+   wire level). T3 of the v3 probe sent A.decline and B.accept on the
+   same `id=1`; the command executed (`commandExecution.status =
+   "completed"`), implying B.accept was the operative decision.
+
+**Implications for codex-rc** (already correctly implemented):
+
+- Re-broadcasting incoming approvals to all browser clients is
+  correct (we do this in `Session.handleServerRequest`).
+- Listening for `serverRequest/resolved` to clean up stale
+  approvals is **mandatory**, not optional, because another client
+  of the shared app-server can resolve at any time. (Implemented in
+  Phase 2B.)
+- UI must immediately disable approve/deny buttons after the user
+  taps one, so we don't double-respond. (Implementation already
+  hides the banner once the local approvals map is cleared.)
+- The "race two clicks across two devices" case will resolve via
+  whichever decision the app-server ends up applying — the user
+  cannot rely on first-clicker semantics.
+
+**A new flag to know about:** when an approval is pending, the
+thread `status/changed` notification carries an `activeFlags`
+array containing `"waitingOnApproval"`. We could surface that in
+the UI ("waiting for human") if we want a clearer state than the
+existing `awaitingApproval` derivation.
+
+#### Original prose from round 2 (preserved for context)
 
 We attempted to force an approval request by:
 
@@ -730,9 +774,9 @@ during 2B implementation or accept as guesses:
 
 | # | Question | Why it didn't get answered | When to revisit |
 |---|---|---|---|
-| Q1 | Does an approval `serverRequest` go to all resumed clients or only the turn originator? | `echo` is on a trusted-commands allowlist; we never triggered an approval. | Phase 2B integration test using `mkdir /private/tmp/x` or `curl https://example.com -o /tmp/x` to force it. |
-| Q2 | If two clients respond to the same approval id, what happens to the second? | Same. | Same. |
-| Q3 | Does `serverRequest/resolved` arrive on all resumed clients or only the responder? | Same. | Same. |
+| Q1 | Does an approval `serverRequest` go to all resumed clients or only the turn originator? | ✅ **Settled in round 3.** Goes to **all resumed clients** with the same `id`. |
+| Q2 | If two clients respond to the same approval id, what happens to the second? | ✅ **Settled in round 3.** Both responses are accepted; the app-server resolves with the *last* decision (or non-deterministic at the wire layer). No errors are returned to the loser. |
+| Q3 | Does `serverRequest/resolved` arrive on all resumed clients or only the responder? | ✅ **Settled in round 3.** Fans out to **all** resumed clients, regardless of who responded. |
 | Q4 | What does the app-server do when it has zero clients and an outstanding approval? Hold the turn? Time out? | Out of scope of probes so far. | Add "kill all clients while approval pending" test. |
 | Q5 | What's the exact `thread/read` parameter shape — does it stream items via notifications or return them in the response? | Skipped to keep probes focused. | While implementing recovery in 2B, read codex source under `codex-rs/app-server-protocol/`. |
 | Q6 | Are there any thread-level events that *only* the originating connection sees, beyond `mcpServer/startupStatus/updated`? | Saw the one example, didn't enumerate. | If anything looks "missing" on a non-origin client during 2B testing. |

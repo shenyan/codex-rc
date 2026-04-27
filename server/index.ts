@@ -7,6 +7,7 @@ import { Session } from "./session";
 import type { CodexTransport } from "./codex/transports/types";
 import { StdioCodexTransport } from "./codex/transports/stdio";
 import { WsCodexTransport } from "./codex/transports/ws";
+import { ensureAppServer } from "./codex/lifecycle";
 import type { ClientMsg, ServerMsg } from "../shared/protocol";
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -22,6 +23,7 @@ const DEFAULT_MODEL = process.env.CODEX_RC_MODEL ?? "gpt-5.5";
 const CODEX_TRANSPORT = (process.env.CODEX_RC_CODEX_TRANSPORT ?? "stdio").toLowerCase();
 const CODEX_WS_URL = process.env.CODEX_RC_CODEX_WS_URL ?? "";
 const CODEX_WS_AUTH_TOKEN = process.env.CODEX_RC_CODEX_WS_AUTH_TOKEN ?? "";
+const CODEX_WS_AUTOSPAWN = (process.env.CODEX_RC_CODEX_WS_AUTOSPAWN ?? "1") !== "0";
 const DIST_DIR = fileURLToPath(new URL("../dist/", import.meta.url));
 const TOKEN_DIR = join(homedir(), ".arche");
 const TOKEN_FILE = join(TOKEN_DIR, "codex-rc.token");
@@ -55,13 +57,21 @@ function isAuthed(req: Request): boolean {
 }
 
 // ────────────────  transport + session  ────────────────
-function buildTransport(): CodexTransport {
+async function buildTransport(): Promise<CodexTransport> {
   switch (CODEX_TRANSPORT) {
     case "stdio":
       return new StdioCodexTransport();
     case "ws": {
       if (!CODEX_WS_URL) {
         throw new Error("CODEX_RC_CODEX_TRANSPORT=ws requires CODEX_RC_CODEX_WS_URL (e.g. ws://127.0.0.1:9877)");
+      }
+      if (CODEX_WS_AUTOSPAWN) {
+        const r = await ensureAppServer({ url: CODEX_WS_URL });
+        if (r.kind === "spawned") {
+          console.log(`[codex-rc] spawned codex app-server (pid=${r.pid}, log=${r.logFile})`);
+        } else {
+          console.log("[codex-rc] codex app-server already listening");
+        }
       }
       return new WsCodexTransport({
         url: CODEX_WS_URL,
@@ -73,7 +83,7 @@ function buildTransport(): CodexTransport {
   }
 }
 
-const transport = buildTransport();
+const transport = await buildTransport();
 const session = new Session({
   defaultCwd: DEFAULT_CWD,
   defaultModel: DEFAULT_MODEL || null,
