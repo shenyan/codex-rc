@@ -1,5 +1,5 @@
 // Wire protocol between codex-rc server and web client.
-// Codex-side JSON-RPC stays in server/codex-client.ts.
+// Codex-side JSON-RPC stays in server/codex/client.ts.
 
 export type ThreadStatus = "idle" | "active" | "awaitingApproval" | "errored";
 

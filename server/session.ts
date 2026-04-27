@@ -1,7 +1,8 @@
 // State hub: holds threads + chat items + pending approvals; translates
 // codex notifications into our wire protocol; broadcasts to WS clients.
 
-import { CodexClient } from "./codex-client";
+import { CodexClient } from "./codex/client";
+import type { CodexTransport } from "./codex/transports/types";
 import type {
   ApprovalPending,
   ChatItem,
@@ -27,10 +28,11 @@ export class Session {
   readonly defaultCwd: string;
   readonly defaultModel: string | null;
 
-  constructor(defaultCwd: string, defaultModel: string | null) {
-    this.defaultCwd = defaultCwd;
-    this.defaultModel = defaultModel;
+  constructor(opts: { defaultCwd: string; defaultModel: string | null; transport: CodexTransport }) {
+    this.defaultCwd = opts.defaultCwd;
+    this.defaultModel = opts.defaultModel;
     this.codex = new CodexClient({
+      transport: opts.transport,
       onEvent: (msg) => this.handleNotification(msg),
       onRequest: (id, method, params) => this.handleServerRequest(id, method, params),
     });

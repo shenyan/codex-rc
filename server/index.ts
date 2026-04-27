@@ -1,9 +1,12 @@
-// codex-rc entrypoint: spawn codex app-server, serve static + WS.
+// codex-rc entrypoint: open a CodexTransport, serve static + WS.
 //
 // URL: http://<host>:<port>/?t=<token> on first connect (sets cookie).
 // Token is generated on first run and cached at ~/.arche/codex-rc.token.
 
 import { Session } from "./session";
+import type { CodexTransport } from "./codex/transports/types";
+import { StdioCodexTransport } from "./codex/transports/stdio";
+import { WsCodexTransport } from "./codex/transports/ws";
 import type { ClientMsg, ServerMsg } from "../shared/protocol";
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -16,6 +19,9 @@ const PORT = Number(process.env.CODEX_RC_PORT ?? 9876);
 const HOST = process.env.CODEX_RC_HOST ?? "0.0.0.0";
 const DEFAULT_CWD = process.env.CODEX_RC_CWD ?? process.cwd();
 const DEFAULT_MODEL = process.env.CODEX_RC_MODEL ?? "gpt-5.5";
+const CODEX_TRANSPORT = (process.env.CODEX_RC_CODEX_TRANSPORT ?? "stdio").toLowerCase();
+const CODEX_WS_URL = process.env.CODEX_RC_CODEX_WS_URL ?? "";
+const CODEX_WS_AUTH_TOKEN = process.env.CODEX_RC_CODEX_WS_AUTH_TOKEN ?? "";
 const DIST_DIR = fileURLToPath(new URL("../dist/", import.meta.url));
 const TOKEN_DIR = join(homedir(), ".arche");
 const TOKEN_FILE = join(TOKEN_DIR, "codex-rc.token");
@@ -48,10 +54,33 @@ function isAuthed(req: Request): boolean {
   return false;
 }
 
-// ────────────────  session  ────────────────
-const session = new Session(DEFAULT_CWD, DEFAULT_MODEL || null);
+// ────────────────  transport + session  ────────────────
+function buildTransport(): CodexTransport {
+  switch (CODEX_TRANSPORT) {
+    case "stdio":
+      return new StdioCodexTransport();
+    case "ws": {
+      if (!CODEX_WS_URL) {
+        throw new Error("CODEX_RC_CODEX_TRANSPORT=ws requires CODEX_RC_CODEX_WS_URL (e.g. ws://127.0.0.1:9877)");
+      }
+      return new WsCodexTransport({
+        url: CODEX_WS_URL,
+        authToken: CODEX_WS_AUTH_TOKEN || undefined,
+      });
+    }
+    default:
+      throw new Error(`unknown CODEX_RC_CODEX_TRANSPORT=${CODEX_TRANSPORT}; expected "stdio" or "ws"`);
+  }
+}
+
+const transport = buildTransport();
+const session = new Session({
+  defaultCwd: DEFAULT_CWD,
+  defaultModel: DEFAULT_MODEL || null,
+  transport,
+});
 await session.ready();
-console.log("[codex-rc] codex app-server ready");
+console.log(`[codex-rc] codex app-server ready (transport=${CODEX_TRANSPORT}${CODEX_TRANSPORT === "ws" ? `, url=${CODEX_WS_URL}` : ""})`);
 
 // ────────────────  server  ────────────────
 type WsData = { send: (m: ServerMsg) => void; unsubscribe: () => void };
