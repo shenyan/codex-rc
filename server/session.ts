@@ -347,15 +347,16 @@ export class Session {
         const existing = t.items.findIndex((x) => x.id === ci.id);
         if (existing >= 0) {
           // For commandExecution: deltas accumulate stdout/stderr in our
-          // local item.output. The codex item/completed notification only
-          // populates `aggregatedOutput` if the command actually finished
-          // (and even then sometimes it's null for short commands).
-          // Prefer whichever string is longer so we don't blow away
-          // streamed bytes with a null/empty completion payload.
+          // local item.output. The codex item/completed notification's
+          // `aggregatedOutput` is the authoritative final string when
+          // it's non-empty — it may even be *shorter* than what we
+          // accumulated (different newline handling, redactions, etc.)
+          // and we should still trust it. Only keep our streamed bytes
+          // when the completion payload is genuinely empty/null.
           if (ci.kind === "command" && t.items[existing].kind === "command") {
             const prev = (t.items[existing] as any).output ?? "";
             const next = (ci as any).output ?? "";
-            (ci as any).output = next.length >= prev.length ? next : prev;
+            if (!next && prev) (ci as any).output = prev;
           }
           t.items[existing] = ci;
           this.broadcast({ type: "item_updated", threadId: t.summary.id, item: ci });
