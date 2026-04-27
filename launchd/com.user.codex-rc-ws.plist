@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  codex-rc-ws LaunchAgent template.
+  Installed by `bin/install-launchd.sh`, which interpolates {{HOME}},
+  {{REPO}}, {{BUN}} and {{PATH}} before copying to
+  ~/Library/LaunchAgents/com.user.codex-rc-ws.plist.
+
+  Runs the ws-flavored codex-rc instance (Phase 2D), which:
+    - listens on :9886 with token-cookie auth
+    - attaches to ws://127.0.0.1:9877 codex app-server
+    - auto-spawns the app-server on first run if not already up
+    - survives codex-rc restarts (Phase 2C detached spawn)
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.codex-rc-ws</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{BUN}}</string>
+        <string>server/index.ts</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>{{REPO}}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>{{HOME}}</string>
+        <key>PATH</key>
+        <string>{{PATH}}</string>
+        <key>CODEX_RC_INSTANCE</key>
+        <string>ws</string>
+        <key>CODEX_RC_PORT</key>
+        <string>9886</string>
+        <key>CODEX_RC_CODEX_TRANSPORT</key>
+        <string>ws</string>
+        <key>CODEX_RC_CODEX_WS_URL</key>
+        <string>ws://127.0.0.1:9877</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>StandardOutPath</key>
+    <string>{{HOME}}/.codex/logs/codex-rc-ws.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{HOME}}/.codex/logs/codex-rc-ws.err.log</string>
+</dict>
+</plist>
