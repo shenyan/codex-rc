@@ -11,22 +11,7 @@ import { describe, it, expect } from "bun:test";
 import { spawn, type Subprocess } from "bun";
 import { Session } from "../server/session";
 import { WsCodexTransport } from "../server/codex/transports/ws";
-
-async function waitListen(port: number, timeoutMs = 15000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const s = await Bun.connect({
-        hostname: "127.0.0.1", port,
-        socket: { data() {}, close() {}, error() {}, open() {} },
-      });
-      s.end();
-      return;
-    } catch {}
-    await Bun.sleep(150);
-  }
-  throw new Error(`port ${port} did not open in ${timeoutMs}ms`);
-}
+import { getFreePort, waitListen } from "./_helpers";
 
 function makeSession(port: number) {
   const transport = new WsCodexTransport({ url: `ws://127.0.0.1:${port}` });
@@ -38,16 +23,18 @@ function makeSession(port: number) {
 }
 
 describe("Session recovery", () => {
-  let server: Subprocess<"ignore", "pipe", "pipe"> | null = null;
-  const port = 9882;
+  let server: Subprocess | null = null;
 
   it("recovers threads created by a previous Session", async () => {
+    const port = await getFreePort();
+    // stdout/stderr ignored so a chatty app-server can't fill its
+    // pipe buffers and stall under load.
     server = spawn({
       cmd: ["codex", "app-server", "--listen", `ws://127.0.0.1:${port}`],
-      stdin: "ignore", stdout: "pipe", stderr: "pipe",
+      stdin: "ignore", stdout: "ignore", stderr: "ignore",
     });
     try {
-      await waitListen(port);
+      await waitListen("127.0.0.1", port);
 
       // ── pass 1: create a thread + run a turn so a rollout is written
       const s1 = makeSession(port);
@@ -108,13 +95,14 @@ describe("Session recovery", () => {
   }, 120_000);
 
   it("rejects send_text when a turn is already in flight", async () => {
+    const port = await getFreePort();
     server = spawn({
-      cmd: ["codex", "app-server", "--listen", `ws://127.0.0.1:${port + 1}`],
-      stdin: "ignore", stdout: "pipe", stderr: "pipe",
+      cmd: ["codex", "app-server", "--listen", `ws://127.0.0.1:${port}`],
+      stdin: "ignore", stdout: "ignore", stderr: "ignore",
     });
     try {
-      await waitListen(port + 1);
-      const s = makeSession(port + 1);
+      await waitListen("127.0.0.1", port);
+      const s = makeSession(port);
       await s.ready();
       let createdId = "";
       const captured: any[] = [];

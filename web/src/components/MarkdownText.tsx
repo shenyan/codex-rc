@@ -1,7 +1,7 @@
-// Renders agent text as Markdown. Lazy candidate (react-markdown +
-// remark-gfm together are ~80 KB un-gzipped) — but they're loaded on
-// the chat detail route which already bundles xterm separately, so
-// the marginal cost is fine to keep eager.
+// Renders agent text as Markdown. react-markdown + remark-gfm together
+// are ~80 KB un-gzipped, so this component is lazy-loaded by Chat.tsx
+// (React.lazy + Suspense) and ships in its own chunk that only
+// downloads the first time you open a chat detail.
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";

@@ -90,7 +90,13 @@ export default function Chat({ threadId }: { threadId: string }) {
                   data-testid="approve-accept-session"
                   onClick={() => send({ type: "approve", requestId: p.requestId, decision: "acceptForSession" })}
                   className="bg-emerald-700 text-white rounded px-2 py-1 text-xs"
-                  title="Allow this command for the rest of the session without asking again"
+                  title={
+                    p.kind === "command"
+                      ? "Allow this command for the rest of the session without asking again"
+                      : p.kind === "fileChange"
+                        ? "Allow this file change for the rest of the session without asking again"
+                        : "Allow this kind of action for the rest of the session without asking again"
+                  }
                 >
                   Allow this session
                 </button>

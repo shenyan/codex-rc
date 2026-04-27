@@ -61,25 +61,32 @@ export async function ensureAppServer(opts: EnsureAppServerOpts): Promise<Ensure
 
 function parseWsUrl(url: string): { host: string; port: number } {
   const u = new URL(url);
+  let host = u.hostname || "127.0.0.1";
+  // 0.0.0.0 / :: are valid bind addresses but not connect addresses;
+  // probing them never succeeds. Map to loopback so the reachability
+  // check actually works against a server listening on "any".
+  if (host === "0.0.0.0" || host === "::" || host === "[::]") {
+    host = "127.0.0.1";
+  }
   const port = Number(u.port || (u.protocol === "wss:" ? 443 : 80));
-  return { host: u.hostname || "127.0.0.1", port };
+  return { host, port };
 }
 
 async function canConnect(host: string, port: number, timeoutMs: number): Promise<boolean> {
-  try {
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), timeoutMs);
+  // Bun.connect's API doesn't take an AbortSignal, so we race the
+  // connect against a sleep. The earlier version set a setTimeout
+  // and forgot to clear it, leaking timers in waitListen() loops.
+  const connect = (async () => {
     const sock = await Bun.connect({
       hostname: host,
       port,
       socket: { data() {}, close() {}, error() {}, open() {} },
     });
-    clearTimeout(timer);
     sock.end();
     return true;
-  } catch {
-    return false;
-  }
+  })().catch(() => false);
+  const timeout = Bun.sleep(timeoutMs).then(() => false);
+  return await Promise.race([connect, timeout]);
 }
 
 async function waitListen(host: string, port: number, timeoutMs: number): Promise<boolean> {
