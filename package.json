@@ -7,7 +7,7 @@
     "dev:web": "vite",
     "build": "vite build",
     "start": "bun server/index.ts",
-    "test": "bun test tests/transport.test.ts",
+    "test": "bun test tests/transport.test.ts tests/recovery.test.ts",
     "test:e2e": "npx playwright test"
   },
   "dependencies": {

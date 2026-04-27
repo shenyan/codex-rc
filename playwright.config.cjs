@@ -2,6 +2,7 @@ const { defineConfig, devices } = require("@playwright/test");
 
 module.exports = defineConfig({
   testDir: "./tests",
+  testMatch: /.*\.spec\.ts$/,  // *.test.ts are bun-test, not playwright
   timeout: 90_000,
   expect: { timeout: 10_000 },
   reporter: [["list"]],

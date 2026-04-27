@@ -38,7 +38,75 @@ export class Session {
     });
   }
 
-  ready() { return this.codex.ready(); }
+  async ready() {
+    await this.codex.ready();
+    await this.recoverThreads();
+  }
+
+  /**
+   * On startup, hydrate `this.threads` from whatever the app-server
+   * already knows about, and resume each so we receive live
+   * turn/item events. Tolerant of every API failing — empty state
+   * is a fine fallback.
+   */
+  private async recoverThreads() {
+    const loaded: any = await this.codex.request("thread/loaded/list", {}).catch(() => ({ data: [] }));
+    const persisted: any = await this.codex.request("thread/list", {
+      limit: 50,
+      sortKey: "updatedAt",
+      sortDirection: "desc",
+    }).catch(() => ({ data: [] }));
+
+    const seen = new Set<string>();
+    for (const thread of (persisted.data ?? [])) {
+      if (!thread?.id || seen.has(thread.id)) continue;
+      seen.add(thread.id);
+      this.hydrateFromThread(thread);
+    }
+    for (const id of (loaded.data ?? [])) {
+      if (typeof id !== "string" || seen.has(id)) continue;
+      seen.add(id);
+      try {
+        const r: any = await this.codex.request("thread/read", { threadId: id });
+        if (r?.thread) this.hydrateFromThread(r.thread);
+      } catch {
+        // unreadable (likely no rollout yet) — skip; we'll learn about
+        // it via thread/started later.
+      }
+    }
+    // Resume so future turn/item events flow to us. Failures
+    // ("no rollout found") are expected for brand-new threads;
+    // they'll get auto-resumed once their first turn writes a rollout
+    // (handled in turn/completed below).
+    for (const id of seen) {
+      this.codex.request("thread/resume", { threadId: id }).catch(() => {});
+    }
+    if (seen.size > 0) {
+      console.log(`[codex-rc] recovered ${seen.size} thread(s) from app-server`);
+    }
+  }
+
+  private hydrateFromThread(thread: any) {
+    if (!thread?.id) return;
+    if (this.threads.has(thread.id)) return;
+    const ts = (thread.updatedAt ?? thread.createdAt ?? Math.floor(Date.now() / 1000));
+    const summary: ThreadSummary = {
+      id: thread.id,
+      title: thread.name ?? firstUserMessage(thread)?.slice(0, 40) ?? null,
+      cwd: thread.cwd ?? this.defaultCwd,
+      status: "idle",
+      lastActiveAt: ts * 1000,
+      preview: thread.preview ?? lastAgentMessage(thread)?.slice(0, 80) ?? "",
+    };
+    const items: ChatItem[] = [];
+    for (const turn of (thread.turns ?? [])) {
+      for (const item of (turn.items ?? [])) {
+        const ci = mapItem(item, true);
+        if (ci) items.push(ci);
+      }
+    }
+    this.threads.set(thread.id, { summary, items, activeTurnId: null });
+  }
 
   subscribe(s: Subscriber): () => void {
     this.subscribers.add(s);
@@ -61,12 +129,11 @@ export class Session {
         await this.createThread(msg.cwd ?? this.defaultCwd);
         break;
       case "open_thread": {
-        const t = this.threads.get(msg.threadId);
-        if (t) reply({ type: "thread_history", threadId: t.summary.id, items: t.items });
+        await this.openThread(msg.threadId, reply);
         break;
       }
       case "send_text":
-        await this.sendText(msg.threadId, msg.text);
+        await this.sendText(msg.threadId, msg.text, reply);
         break;
       case "approve":
         this.respondApproval(msg.requestId, msg.decision);
@@ -117,9 +184,53 @@ export class Session {
     this.broadcast({ type: "thread_created", thread: summary });
   }
 
-  private async sendText(threadId: string, text: string) {
+  private async openThread(threadId: string, reply: Subscriber): Promise<void> {
+    let t = this.threads.get(threadId);
+    // Lazy-hydrate items from rollout the first time we open a thread.
+    // (Empty `items` in memory is the trigger; on subsequent opens we
+    // just return what's there.)
+    if (t && t.items.length === 0) {
+      try {
+        const r: any = await this.codex.request("thread/read", { threadId, includeTurns: true });
+        const turns = r?.thread?.turns ?? [];
+        for (const turn of turns) {
+          for (const item of (turn.items ?? [])) {
+            const ci = mapItem(item, true);
+            if (ci) t.items.push(ci);
+          }
+        }
+      } catch {
+        // no rollout yet (brand-new thread) — that's fine, items stays empty.
+      }
+    }
+    // Thread might exist on the app-server but not in our map (e.g. created by
+    // another client between recoverThreads and now). Try a one-shot recovery.
+    if (!t) {
+      try {
+        const r: any = await this.codex.request("thread/read", { threadId, includeTurns: true });
+        if (r?.thread) {
+          this.hydrateFromThread(r.thread);
+          this.codex.request("thread/resume", { threadId }).catch(() => {});
+          t = this.threads.get(threadId);
+          if (t) this.broadcast({ type: "thread_created", thread: t.summary });
+        }
+      } catch {
+        // not found — ignore
+      }
+    }
+    if (t) reply({ type: "thread_history", threadId: t.summary.id, items: t.items });
+  }
+
+  private async sendText(threadId: string, text: string, reply: Subscriber): Promise<void> {
     const t = this.threads.get(threadId);
-    if (!t) throw new Error("unknown thread " + threadId);
+    if (!t) {
+      reply({ type: "error", message: "unknown thread " + threadId });
+      return;
+    }
+    if (t.activeTurnId !== null) {
+      reply({ type: "error", message: "thread is busy; interrupt the running turn first" });
+      return;
+    }
     await this.codex.request("turn/start", {
       threadId,
       input: [{ type: "text", text }],
@@ -134,9 +245,19 @@ export class Session {
     const t = threadId ? this.threads.get(threadId) : undefined;
 
     switch (m) {
-      case "thread/started":
-        // already handled in createThread
+      case "thread/started": {
+        const tt = p.thread;
+        if (!tt?.id) break;
+        if (this.threads.has(tt.id)) break; // we created it
+        // Another client (e.g. terminal TUI) just created this thread.
+        this.hydrateFromThread(tt);
+        const local = this.threads.get(tt.id);
+        if (local) this.broadcast({ type: "thread_created", thread: local.summary });
+        // Resume eventually — first attempt will likely fail because
+        // there's no rollout yet, so retry once turn/completed fires.
+        this.codex.request("thread/resume", { threadId: tt.id }).catch(() => {});
         break;
+      }
 
       case "thread/status/changed": {
         if (!t) break;
@@ -155,7 +276,23 @@ export class Session {
         if (!t) break;
         t.activeTurnId = null;
         this.updateSummary(t, { status: "idle", lastActiveAt: Date.now() });
+        // First turn writes the rollout; if our earlier thread/resume
+        // for this thread failed ("no rollout found"), try again now.
+        // Cheap to call repeatedly — codex idempotently re-subscribes.
+        if (threadId) this.codex.request("thread/resume", { threadId }).catch(() => {});
         break;
+
+      case "serverRequest/resolved": {
+        // Fired when the app-server retires a serverRequest — either
+        // because we responded, or because another client of the same
+        // shared app-server (e.g. terminal TUI) responded first.
+        // Either way, drop the pending approval and tell the UI.
+        const requestId = p.requestId !== undefined ? String(p.requestId) : "";
+        if (requestId && this.approvals.delete(requestId)) {
+          this.broadcast({ type: "approval_resolved", requestId });
+        }
+        break;
+      }
 
       case "item/started":
       case "item/completed": {
@@ -317,6 +454,28 @@ function mapItem(item: any, completed: boolean): ChatItem | null {
     default:
       return null;
   }
+}
+
+function firstUserMessage(thread: any): string | null {
+  for (const turn of (thread.turns ?? [])) {
+    for (const item of (turn.items ?? [])) {
+      if (item?.type === "userMessage") {
+        const text = (item.content ?? []).map((c: any) => c.text).filter(Boolean).join(" ").trim();
+        if (text) return text;
+      }
+    }
+  }
+  return null;
+}
+
+function lastAgentMessage(thread: any): string | null {
+  let last: string | null = null;
+  for (const turn of (thread.turns ?? [])) {
+    for (const item of (turn.items ?? [])) {
+      if (item?.type === "agentMessage" && item.text) last = item.text;
+    }
+  }
+  return last;
 }
 
 function summarizeFileChange(item: any): string {
