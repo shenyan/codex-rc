@@ -6,6 +6,10 @@ import type { ChatItem } from "../../../shared/protocol";
 // page paints fast and xterm only ships the first time you scroll a
 // command-output item into view.
 const CommandTerminal = lazy(() => import("../components/CommandTerminal"));
+// react-markdown + remark-gfm together are smaller (~80 KB) but we
+// also lazy-load to keep the chat-list route lean. While the chunk
+// is loading, plain text is shown — degrades gracefully.
+const MarkdownText = lazy(() => import("../components/MarkdownText"));
 
 const EMPTY_ITEMS: ChatItem[] = [];
 
@@ -166,9 +170,10 @@ function ItemView({ item }: { item: ChatItem }) {
     case "agent":
       return (
         <div className="flex" data-testid="msg-agent">
-          <div className="bg-panel border border-border rounded-2xl px-3 py-2 max-w-[85%] whitespace-pre-wrap [overflow-wrap:anywhere]">
-            {item.text}
-            {item.streaming && <span className="opacity-50 animate-pulse">▌</span>}
+          <div className="bg-panel border border-border rounded-2xl px-3 py-2 max-w-[85%] [overflow-wrap:anywhere]">
+            <Suspense fallback={<div className="whitespace-pre-wrap">{item.text}{item.streaming && <span className="opacity-50 animate-pulse">▌</span>}</div>}>
+              <MarkdownText text={item.text} streaming={item.streaming} />
+            </Suspense>
           </div>
         </div>
       );
