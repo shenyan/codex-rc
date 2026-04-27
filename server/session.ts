@@ -325,7 +325,6 @@ export class Session {
         // Cheap to call repeatedly — codex idempotently re-subscribes.
         if (threadId) this.codex.request("thread/resume", { threadId }).catch(() => {});
         break;
-      }
 
       case "serverRequest/resolved": {
         // Fired when the app-server retires a serverRequest — either

@@ -92,8 +92,10 @@ export class WsCodexTransport implements CodexTransport {
 
   /**
    * Initiate a graceful WebSocket close and wait until the underlying
-   * channel reports CLOSED (with a 2 s safety timeout). Caller can rely
-   * on the connection being gone after this resolves.
+   * channel reports CLOSED, with a 2 s safety timeout. Resolves either
+   * way; if the timer wins the underlying socket may not actually be
+   * closed yet, in which case we log a warning so the caller can see
+   * it in the server log instead of silently shipping past it.
    */
   async close(): Promise<void> {
     if (this.closed) return;
@@ -101,13 +103,29 @@ export class WsCodexTransport implements CodexTransport {
     if (this.ws.readyState === WebSocket.CLOSED) return;
 
     await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, 2000);
-      const done = () => { clearTimeout(timer); resolve(); };
-      this.ws.addEventListener("close", done, { once: true });
+      const onClose = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        // Detach the listener — the close event might still fire later
+        // and we don't want a stale `resolve` floating around.
+        this.ws.removeEventListener("close", onClose);
+        if (this.ws.readyState !== WebSocket.CLOSED) {
+          console.warn(
+            `[codex ws] close() timed out after 2s (readyState=${this.ws.readyState}); ` +
+            `socket may still be open`,
+          );
+        }
+        resolve();
+      }, 2000);
+      this.ws.addEventListener("close", onClose, { once: true });
       try {
         this.ws.close(1000, "client closing");
       } catch {
-        done();
+        clearTimeout(timer);
+        this.ws.removeEventListener("close", onClose);
+        resolve();
       }
     });
   }
