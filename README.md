@@ -24,7 +24,7 @@ where the server itself sees `https`.
 ```bash
 bun install
 bun run build              # builds web/ → dist/
-bun run start              # spawns codex + serves on :9876
+bun run start              # default stdio instance on :9876
 ```
 
 The first run prints a token-bearing URL like:
@@ -37,6 +37,30 @@ Open it on phone (over Tailscale) — server sets a long-lived cookie on
 first hit, then strips the token from the URL.
 
 The token is generated once and cached at `~/.arche/codex-rc.token`.
+
+### Two flavors at once: stdio + ws
+
+You can run the original stdio-backed instance and the new
+ws-backed (shared app-server) instance side by side, on different
+ports, so the same phone has two URLs to choose from.
+
+```bash
+bun run start:both
+```
+
+…starts both:
+
+| URL | Backend | What |
+|---|---|---|
+| `http://...:9876/?t=...` | stdio child (private) | original Phase-1 behavior, one app-server per codex-rc |
+| `http://...:9886/?t=...` | ws → `127.0.0.1:9877` (shared) | attaches to a long-running app-server (auto-spawned the first time); a terminal `codex --remote ws://127.0.0.1:9877` can join the same agent |
+
+Each instance has its own token (`~/.arche/codex-rc.token` and
+`codex-rc-ws.token`) and its own cookie name
+(`codex_rc_token` vs `codex_rc_token-ws`) so they don't collide
+when the browser sees both URLs on the same hostname.
+
+You can also run just the ws version: `bun run start:ws`.
 
 ## Dev mode
 
@@ -101,6 +125,7 @@ Projects: `iphone`, `ipad`, `desktop`. Screenshots are saved to
 
 | Env | Default | What |
 |---|---|---|
+| `CODEX_RC_INSTANCE` | _(empty)_ | optional name (e.g. `ws`) — scopes the token file (`codex-rc-${name}.token`) and cookie name (`codex_rc_token-${name}`) so multiple codex-rc instances on the same host don't collide. Banner also prints `codex-rc[${name}]`. |
 | `CODEX_RC_PORT` | `9876` | server port |
 | `CODEX_RC_HOST` | `0.0.0.0` | bind host |
 | `CODEX_RC_CWD` | cwd | default cwd for new threads |
