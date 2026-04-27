@@ -27,6 +27,10 @@ const PORT = Number(process.env.CODEX_RC_PORT ?? 9876);
 const HOST = process.env.CODEX_RC_HOST ?? "0.0.0.0";
 const DEFAULT_CWD = process.env.CODEX_RC_CWD ?? process.cwd();
 const DEFAULT_MODEL = process.env.CODEX_RC_MODEL ?? "gpt-5.5";
+// Defaults to YOLO ("never" + "dangerFullAccess") — see session.ts
+// rationale. Override with these env vars when you want it stricter.
+const DEFAULT_APPROVAL_POLICY = process.env.CODEX_RC_APPROVAL_POLICY ?? "never";
+const DEFAULT_SANDBOX_MODE = process.env.CODEX_RC_SANDBOX_MODE ?? "dangerFullAccess";
 const CODEX_TRANSPORT = (process.env.CODEX_RC_CODEX_TRANSPORT ?? "stdio").toLowerCase();
 const CODEX_WS_URL = process.env.CODEX_RC_CODEX_WS_URL ?? "";
 const CODEX_WS_AUTH_TOKEN = process.env.CODEX_RC_CODEX_WS_AUTH_TOKEN ?? "";
@@ -97,6 +101,8 @@ const transport = await buildTransport();
 const session = new Session({
   defaultCwd: DEFAULT_CWD,
   defaultModel: DEFAULT_MODEL || null,
+  defaultApprovalPolicy: DEFAULT_APPROVAL_POLICY,
+  defaultSandboxMode: DEFAULT_SANDBOX_MODE,
   transport,
 });
 await session.ready();

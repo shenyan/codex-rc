@@ -27,10 +27,26 @@ export class Session {
   private subscribers = new Set<Subscriber>();
   readonly defaultCwd: string;
   readonly defaultModel: string | null;
+  readonly defaultApprovalPolicy: string;
+  readonly defaultSandboxMode: string;
 
-  constructor(opts: { defaultCwd: string; defaultModel: string | null; transport: CodexTransport }) {
+  constructor(opts: {
+    defaultCwd: string;
+    defaultModel: string | null;
+    defaultApprovalPolicy?: string;   // "on-request" | "untrusted" | "never"
+    defaultSandboxMode?: string;       // "workspaceWrite" | "readOnly" | "dangerFullAccess"
+    transport: CodexTransport;
+  }) {
     this.defaultCwd = opts.defaultCwd;
     this.defaultModel = opts.defaultModel;
+    // YOLO defaults — match the spirit of Claude Code's
+    // --dangerously-skip-permissions. codex-rc is driven from the
+    // user's own phone over Tailscale, so the assumption is "the
+    // person sending prompts is the laptop's owner". Tighten via
+    // CODEX_RC_APPROVAL_POLICY / CODEX_RC_SANDBOX_MODE env if you
+    // want it to ask before touching things.
+    this.defaultApprovalPolicy = opts.defaultApprovalPolicy ?? "never";
+    this.defaultSandboxMode = opts.defaultSandboxMode ?? "dangerFullAccess";
     this.codex = new CodexClient({
       transport: opts.transport,
       onEvent: (msg) => this.handleNotification(msg),
@@ -166,8 +182,8 @@ export class Session {
   private async createThread(cwd: string) {
     const params: any = {
       cwd,
-      approvalPolicy: "on-request",
-      sandboxPolicy: { type: "workspaceWrite" },
+      approvalPolicy: this.defaultApprovalPolicy,
+      sandboxPolicy: { type: this.defaultSandboxMode },
     };
     if (this.defaultModel) params.model = this.defaultModel;
     const res: any = await this.codex.request("thread/start", params);
@@ -307,6 +323,17 @@ export class Session {
         if (!ci) break;
         const existing = t.items.findIndex((x) => x.id === ci.id);
         if (existing >= 0) {
+          // For commandExecution: deltas accumulate stdout/stderr in our
+          // local item.output. The codex item/completed notification only
+          // populates `aggregatedOutput` if the command actually finished
+          // (and even then sometimes it's null for short commands).
+          // Prefer whichever string is longer so we don't blow away
+          // streamed bytes with a null/empty completion payload.
+          if (ci.kind === "command" && t.items[existing].kind === "command") {
+            const prev = (t.items[existing] as any).output ?? "";
+            const next = (ci as any).output ?? "";
+            (ci as any).output = next.length >= prev.length ? next : prev;
+          }
           t.items[existing] = ci;
           this.broadcast({ type: "item_updated", threadId: t.summary.id, item: ci });
         } else {
@@ -359,13 +386,18 @@ export class Session {
       }
 
       case "item/commandExecution/outputDelta": {
+        // Per codex protocol v2 (CommandExecutionOutputDeltaNotification):
+        // params = { threadId, turnId, itemId, delta: string }.
+        // The aggregatedOutput from codex already interleaves stdout+stderr
+        // in the order they came out — we just append `delta` raw, so xterm
+        // sees the same byte stream a real terminal would.
         if (!t) break;
         const itemId = p.itemId as string;
-        const stream: string = p.stream ?? "stdout";
-        const text = p.deltaBase64 ? new TextDecoder().decode(Buffer.from(p.deltaBase64, "base64")) : (p.delta ?? "");
+        const delta = (p.delta ?? "") as string;
+        if (!delta) break;
         const idx = t.items.findIndex((x) => x.id === itemId);
         if (idx >= 0 && t.items[idx].kind === "command") {
-          (t.items[idx] as any).output += `[${stream}] ${text}`;
+          (t.items[idx] as any).output += delta;
           this.broadcast({ type: "item_updated", threadId: t.summary.id, item: t.items[idx] });
         }
         break;
@@ -445,7 +477,10 @@ function mapItem(item: any, completed: boolean): ChatItem | null {
         id: item.id,
         command: item.command ?? "",
         cwd: item.cwd,
-        output: item.output ?? "",
+        // codex protocol v2 uses `aggregatedOutput` (camelCase of
+        // aggregated_output). The historical name `output` is also
+        // checked as a fallback for older codex versions.
+        output: item.aggregatedOutput ?? item.output ?? "",
         status: completed ? (item.status ?? "completed") : "running",
         createdAt: Date.now(),
       };
